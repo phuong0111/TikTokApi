@@ -54,9 +54,10 @@ class StealthConfig:
     The stealth strategies are contained in ./js package and are basic javascript scripts that are executed
     on every page.goto() called.
     Note:
-        All init scripts are combined by playwright into one script and then executed this means
-        the scripts should not have conflicting constants/variables etc. !
-        This also means scripts can be extended by overriding enabled_scripts generator:
+        Playwright evaluates every add_init_script in its own scope, so the scripts are
+        combined here instead: `preamble` defines the `opts`/`utils` scope the evasions
+        are written against, and they only see it because they ship as one script.
+        Scripts can be extended by overriding the enabled_scripts generator:
         ```
         @property
         def enabled_scripts():
@@ -95,7 +96,8 @@ class StealthConfig:
     runOnInsecureOrigins: Optional[bool] = None
 
     @property
-    def enabled_scripts(self):
+    def preamble(self):
+        """The shared scope every evasion below is written against."""
         opts = json.dumps(
             {
                 "webgl_vendor": self.vendor,
@@ -113,6 +115,8 @@ class StealthConfig:
         yield SCRIPTS["utils"]
         yield SCRIPTS["generate_magic_arrays"]
 
+    @property
+    def enabled_scripts(self):
         if self.chrome_app:
             yield SCRIPTS["chrome_app"]
         if self.chrome_csi:
@@ -147,7 +151,24 @@ class StealthConfig:
             yield SCRIPTS["webgl_vendor"]
 
 
+def build_script(config: StealthConfig = None) -> str:
+    """The evasions as one script sharing one scope.
+
+    Wrapped in an IIFE so `opts` and `utils` stay off `window` - a page that can read
+    them detects the stealth layer more cheaply than any tell it hides. Each evasion is
+    isolated in turn because several (chrome_load_times, chrome_runtime) throw by design
+    when they detect a real Chrome, and a bare throw would abort every script after it.
+    """
+    config = config or StealthConfig()
+    evasions = "\n".join(
+        f"try {{ (() => {{\n{script}\n}})() }} catch (e) {{}}"
+        for script in config.enabled_scripts
+    )
+    # the preamble stays unguarded: if it breaks, every evasion silently does too, so
+    # that has to surface as an uncaught error rather than being swallowed here
+    return "(() => {\n" + "\n".join(config.preamble) + "\n" + evasions + "\n})()"
+
+
 async def stealth_async(page: AsyncPage, config: StealthConfig = None):
     """stealth the page"""
-    for script in (config or StealthConfig()).enabled_scripts:
-        await page.add_init_script(script)
+    await page.add_init_script(build_script(config))

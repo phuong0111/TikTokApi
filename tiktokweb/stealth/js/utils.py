@@ -1,4 +1,4 @@
-utils = """
+utils = r"""
 /**
  * A set of shared utility functions specifically for the purpose of modifying native browser APIs without leaving traces.
  *
