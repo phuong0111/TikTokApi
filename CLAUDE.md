@@ -16,12 +16,54 @@ uv venv && uv pip install --python .venv/bin/python -r requirements.txt   # play
 
 `python -m playwright install` is **not** needed — it drives the installed Chrome via `executable_path`, autodetected by `cookies.find_chrome()`.
 
-The test suite is live-only (it talks to TikTok), so there is no offline `pytest`:
+There are two suites: an offline `pytest` one, and the live one that talks to TikTok.
 
 ```bash
 .venv/bin/python -m tiktokweb selftest                 # all endpoints, ~10 browsers
 .venv/bin/python -m tiktokweb selftest --skip-comments # faster; skips the headed one
 ```
+
+## Testing
+
+```bash
+uv pip install --python .venv/bin/python -r requirements-dev.txt   # pytest, pytest-asyncio
+.venv/bin/python -m pytest                  # offline suite, ~0.2s, no browser
+.venv/bin/python -m pytest -m live          # the browser suite (slow, needs cookies.json)
+.venv/bin/python test/capture_fixtures.py   # regenerate test/fixtures/ from a live run
+```
+
+The venv is built with `uv venv` and has no `pip`, hence `uv pip` above.
+
+`test/unit/` never opens a browser or a socket, and that is enforced rather than assumed:
+an autouse fixture in [test/unit/conftest.py](test/unit/conftest.py) patches
+`socket.connect` and both modules' **already-bound** `async_playwright` to raise —
+patching `playwright.async_api` would not work, since `browser.py` and `cookies.py` bind
+the name at import. A test that reaches out fails loudly instead of quietly going live
+and passing. `addopts = -m "not live"` in `pytest.ini` keeps bare `pytest` offline.
+
+It parses **captured** payloads from `test/fixtures/` rather than hand-written JSON, so a
+renamed TikTok key fails a test. Those payloads are **gitignored** — they are real
+third-party data and this repo is public — so a fresh clone has none and the tests that
+need them skip with the command to capture them; run `test/capture_fixtures.py` once to
+turn the full suite on (58 passed / 24 skipped without them, 82 passed with). They also
+go stale — see [test/fixtures/README.md](test/fixtures/README.md) for provenance, the
+recapture command,
+and the scrubbing rule (**never** add a bare `auth` to the pattern: it matches TikTok's
+own `author` keys and silently strips every item's author block). Treat `pytest -m live`
+as the check against reality.
+
+Two tests in [test/unit/test_browser_capture.py](test/unit/test_browser_capture.py) are regressions
+rather than coverage — `_flush` retaining tasks appended while it awaited, and `_drain`
+bounding its body read. Both were validated by injecting the bug and watching them go
+red. Both bugs present as an empty endpoint or a hang, indistinguishable from TikTok's
+normal flakiness, so do not delete them as redundant.
+
+`test/live/` wraps the existing modules rather than replacing them: one
+`livetest.main()` run indexed by endpoint, plus `stealthtest.CASES` one browser at a
+time. `python -m tiktokweb selftest` is unchanged and still the direct way in. Note that
+`pytest_collection_modifyitems` in [test/live/conftest.py](test/live/conftest.py) is a
+**global** hook even though it lives in a subdirectory — it filters by path, and without
+that filter it marks the entire suite `live` and deselects everything.
 
 ## Why this drives a browser (verified 2026-08-27)
 
@@ -128,4 +170,9 @@ The original `TikTokApi` fork is gone, but two of its lessons apply to any code 
 ### Other
 
 - `tt.search.users()` is reliable; `search.videos()` uses the general-search endpoint and is less predictable.
+  It returns **mixed blocks**, not just videos: searching a username yields user cards (`card_title`,
+  `user_list`, `view_more`) with no `item` key, and `SearchResource.videos()` maps every block through
+  `Video.from_raw()` regardless — so those come back as `Video` objects with `id=None`. Filter on
+  `.id` at the call site, or search a content term rather than a name. Found 2026-08-28 while capturing
+  test fixtures; the library is unchanged.
 - Never print a resolved cookie source — it may be a raw cookie string containing `sessionid`.
