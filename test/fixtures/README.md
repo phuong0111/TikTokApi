@@ -1,5 +1,11 @@
 # Captured fixtures
 
+**These files are gitignored — only this README is committed.** They are real
+third-party data (commenter handles and comment text, account records) and this repo is
+public, so the payloads stay on the machine that captured them. A fresh clone has none;
+the offline suite skips the tests that need them, with a message naming the command to
+capture them. Everything that does not need a fixture still runs.
+
 Real TikTok response data, captured once so the offline suite parses the shapes TikTok
 actually sends rather than shapes we invented. Hand-written JSON would only prove
 `from_raw` handles the author's guess; a renamed TikTok key — the failure this codebase

@@ -42,8 +42,12 @@ the name at import. A test that reaches out fails loudly instead of quietly goin
 and passing. `addopts = -m "not live"` in `pytest.ini` keeps bare `pytest` offline.
 
 It parses **captured** payloads from `test/fixtures/` rather than hand-written JSON, so a
-renamed TikTok key fails a test. Those fixtures go stale — see
-[test/fixtures/README.md](test/fixtures/README.md) for provenance, the recapture command,
+renamed TikTok key fails a test. Those payloads are **gitignored** — they are real
+third-party data and this repo is public — so a fresh clone has none and the tests that
+need them skip with the command to capture them; run `test/capture_fixtures.py` once to
+turn the full suite on (58 passed / 24 skipped without them, 82 passed with). They also
+go stale — see [test/fixtures/README.md](test/fixtures/README.md) for provenance, the
+recapture command,
 and the scrubbing rule (**never** add a bare `auth` to the pattern: it matches TikTok's
 own `author` keys and silently strips every item's author block). Treat `pytest -m live`
 as the check against reality.

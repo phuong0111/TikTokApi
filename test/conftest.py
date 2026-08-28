@@ -14,8 +14,10 @@ def fixture():
     def load(name):
         path = FIXTURES / f"{name}.json"
         if not path.is_file():
-            pytest.fail(f"missing fixture {path.name}; "
-                        f"regenerate with: .venv/bin/python test/capture_fixtures.py")
+            # fixtures are gitignored real payloads, so a fresh clone has none;
+            # skip rather than fail, and say exactly how to get them
+            pytest.skip(f"no {path.name} - capture the fixtures first: "
+                        f".venv/bin/python test/capture_fixtures.py --only {name}")
         return json.loads(path.read_text())
     return load
 
