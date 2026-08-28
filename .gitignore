@@ -204,3 +204,7 @@ test-results.json
 # third-party data (commenter handles, comment text, account records) and this
 # repo is public. Regenerate with: .venv/bin/python test/capture_fixtures.py
 test/fixtures/*.json
+
+# Superpowers process docs (specs, implementation plans). Working notes, kept
+# local rather than tracked.
+docs/superpowers/
