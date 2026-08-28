@@ -1711,3 +1711,67 @@ After Task 10, confirm the whole thing:
 - [ ] `.venv/bin/python -m tiktokweb selftest --help` — unchanged output.
 - [ ] `grep -rniE "sessionid|msToken|passport" test/fixtures/` — no output.
 - [ ] `.venv/bin/python -m pytest -m live -v` — run once and report the result honestly, including which endpoints failed. Per CLAUDE.md, flakiness is expected; do not edit tests to make a flaky endpoint pass.
+
+---
+
+## Corrections applied during execution (2026-08-28)
+
+The plan above is kept as written; these are the points where it was wrong and what was
+done instead. Anyone re-running it should read this section first.
+
+**Task 1 Step 2 — `pip` does not exist in this venv.** It is built with `uv venv`.
+Use `uv pip install --python .venv/bin/python -r requirements-dev.txt`, matching the
+setup line already in CLAUDE.md.
+
+**Task 4 — `test_flush_is_bounded_when_tasks_keep_arriving` asserted the wrong thing.**
+The plan predicted `len(rounds) == 3`; the real count was 12. `asyncio.create_task`
+schedules eagerly, so a single gather round runs several refills before it settles. The
+test now asserts what actually matters — that `_flush` returns at all and leaves work
+behind — via `asyncio.wait_for(...)` plus a non-empty `_pending`, and stops spawning
+before cleanup so it leaks no tasks.
+
+**Task 4 Step 3 — the injected `_flush` bug was not the bug, and the test did not catch
+it.** Two separate problems:
+
+1. Clearing the pending list *before* the await is equivalent to the swap — the `rounds`
+   loop still recovers the task next round. The real gather-then-clear bug clears
+   *after* the await.
+2. Even with the correct bug injected, the test passed: the task queued by `first()`
+   completed opportunistically on the loop cycles left inside `wait_for`. It only
+   detects the bug once `second()` has a genuine await point (`asyncio.sleep(0.05)`),
+   which it now has.
+
+Both regression tests were then confirmed red against the injected bug and green against
+the real source. The `_drain` one stalls the full 30s when unbounded, as advertised.
+
+**Task 6 — the scrub regex destroyed the fixtures.** `token|session|cookie|secret|auth`
+matches `author`, `authorName` and `authorStats`, so every captured item lost its entire
+author block. The Step 3 secret-scan passed, because nothing secret was there — nothing
+checked that *legitimate* data survived. Caught by `test_models.py` asserting against
+real author values. The pattern is now
+`token|session|cookie|secret|passport|csrf|sid_guard|verifyfp`, and both the script and
+`test/fixtures/README.md` carry a warning against re-adding a bare `auth`.
+
+**Task 6 — one capture run is not enough, and one browser is not enough.** The plan's
+script captured everything in a single session and had no retries. CLAUDE.md is explicit
+that retries are mandatory and that sequential collections in one page compound the bot
+check. The script now opens a **fresh browser per fixture**, retries three times, accepts
+`--only` to refill just what is missing, and walks several videos for comments because
+rendering is flaky per-video rather than per-run. Even so, capturing all six took three
+runs plus two targeted retries: `search_user_items` was empty for six straight attempts,
+and `comment_items` failed all three internal render retries on one run.
+
+**Task 7 — `test_general_search_hits_unwrap_to_a_video` assumed the wrong payload.**
+`/api/search/general` returns **mixed blocks**: a name query answers with user cards
+(`card_title`, `user_list`, `view_more`, no `item` key), and `SearchResource.videos()`
+maps every block through `Video.from_raw()` regardless, yielding `Video` objects with
+`id=None`. Attempts to capture video blocks instead failed on all 7 tries across two
+content terms. The test now asserts the real contract — parsing never raises whatever
+the block type, and any hit carrying `item` unwraps correctly — with deterministic
+unwrap coverage left to the synthetic case in `test_resource_wiring.py`. This behaviour
+is now recorded in CLAUDE.md's Gotchas; the library itself was not changed.
+
+**Task 9 — `pytest_collection_modifyitems` is a global hook.** Even defined in
+`test/live/conftest.py`, it receives every collected item, so the plan's version marked
+all 94 tests `live` and `addopts = -m "not live"` then deselected the entire suite.
+It now filters on the item's path.
